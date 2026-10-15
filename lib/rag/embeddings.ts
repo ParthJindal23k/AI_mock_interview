@@ -1,18 +1,34 @@
-/**
- * Embedding stub.
- *
- * The RAG pipeline's embedding + retrieval calls in nodes.ts are already
- * wrapped in try/catch blocks with graceful fallbacks. When Pinecone is
- * not configured or embeddings fail, the interview continues without
- * RAG context — the LLM evaluates using just the expected answer.
- *
- * To enable full RAG:
- * 1. Set PINECONE_API_KEY and PINECONE_INDEX in .env
- * 2. Ensure your embedding model API has quota
- * 3. The system will automatically start storing and retrieving embeddings
- */
+import { GoogleGenAI } from "@google/genai";
+import { EMBEDDING_DIMENSIONS } from "@/utils/schema";
 
-// Placeholder - embeddings will be generated via the vectorstore module
-// when Pinecone is properly configured
-export const EMBEDDING_MODEL = "text-embedding-004";
-export const EMBEDDING_DIMENSIONS = 768;
+export const EMBEDDING_MODEL = "gemini-embedding-001";
+
+let client: GoogleGenAI | null = null;
+
+function getClient(): GoogleGenAI {
+  if (!client) {
+    client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+  }
+  return client;
+}
+
+/**
+ * Embeds text into a vector of EMBEDDING_DIMENSIONS floats.
+ * Questions are compared with questions, so SEMANTIC_SIMILARITY is the right task type.
+ */
+export async function embedText(text: string): Promise<number[]> {
+  const response = await getClient().models.embedContent({
+    model: EMBEDDING_MODEL,
+    contents: text,
+    config: {
+      taskType: "SEMANTIC_SIMILARITY",
+      outputDimensionality: EMBEDDING_DIMENSIONS,
+    },
+  });
+
+  const values = response.embeddings?.[0]?.values;
+  if (!values || values.length !== EMBEDDING_DIMENSIONS) {
+    throw new Error(`Unexpected embedding size: ${values?.length ?? 0}`);
+  }
+  return values;
+}

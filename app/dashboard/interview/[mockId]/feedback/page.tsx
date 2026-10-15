@@ -1,25 +1,24 @@
 import React from 'react'
 import { db } from '@/utils/db'
-import { InterviewSession, InterviewQuestion, InterviewAnswer } from "@/utils/schema"
+import { InterviewQuestion, InterviewAnswer } from "@/utils/schema"
 import { eq } from 'drizzle-orm'
+import { notFound } from 'next/navigation'
+import { getCurrentUserEmail, getOwnedSession } from '@/lib/auth'
 import FeedbackClient from './FeedbackClient'
 
 async function Feedback({
   params,
 }: {
-  params: { mockId: string }
+  params: Promise<{ mockId: string }>
 }) {
   const sessionId = (await params).mockId
 
-  // Load session
-  const sessions = await db.select().from(InterviewSession)
-    .where(eq(InterviewSession.sessionId, sessionId))
+  const email = await getCurrentUserEmail()
+  const session = email ? await getOwnedSession(sessionId, email) : null
 
-  if (!sessions.length) {
-    return <div className="p-10 text-gray-500">Session not found</div>
+  if (!session) {
+    notFound()
   }
-
-  const session = sessions[0]
 
   // Load questions + answers
   const questions = await db.select().from(InterviewQuestion)

@@ -1,13 +1,13 @@
 /**
  * Groq API model wrapper.
- * Uses Groq's OpenAI-compatible REST API with llama-3.3-70b-versatile.
+ * Uses Groq's OpenAI-compatible REST API (default: openai/gpt-oss-120b).
  * Groq provides generous free tier with very fast inference.
- * 
- * Requires GROQ_API_KEY in .env
+ *
+ * Requires GROQ_API_KEY in .env. Override the model with GROQ_MODEL.
  */
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL_NAME = "llama-3.3-70b-versatile";
+const MODEL_NAME = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 export const model = {
   async invoke(input: string): Promise<{ content: string }> {
@@ -30,7 +30,10 @@ export const model = {
               },
             ],
             temperature: 0.4,
-            max_tokens: 2048,
+            // gpt-oss is a reasoning model; reasoning tokens count toward this limit.
+            max_tokens: 4096,
+            ...(MODEL_NAME.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
+            response_format: { type: "json_object" },
           }),
         });
 

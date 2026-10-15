@@ -1,22 +1,23 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 import { db } from "@/utils/db";
 import { InterviewSession } from "@/utils/schema";
 import { runProcessAnswer } from "@/lib/langgraph/workflow";
+import { getCurrentUserEmail, getOwnedSession } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 import type { InterviewState } from "@/lib/langgraph/state";
+
+export const maxDuration = 60;
 
 /**
  * POST /api/interview/submit
  *
- * Submits a user's answer and triggers the full LangGraph pipeline:
- * evaluateAnswer → generateFeedback → adjustDifficulty → (nextQuestion | summary)
+ * Submits the user's answer and runs the LangGraph workflow (answer branch):
+ * evaluateAnswer → generateFeedback → adjustDifficulty → (generateQuestion | generateSummary)
  */
 export async function POST(req: Request) {
   try {
-    const user = await currentUser();
-
-    if (!user || !user.emailAddresses?.length) {
+    const email = await getCurrentUserEmail();
+    if (!email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -29,16 +30,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1. Load session state from DB
-    const sessions = await db.select()
-      .from(InterviewSession)
-      .where(eq(InterviewSession.sessionId, sessionId));
-
-    if (!sessions.length) {
+    const session = await getOwnedSession(sessionId, email);
+    if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-
-    const session = sessions[0];
 
     if (session.status !== "active") {
       return NextResponse.json(
@@ -47,7 +42,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Restore LangGraph state and inject user answer
     const previousState = session.sessionState as unknown as InterviewState;
 
     if (!previousState || !previousState.currentQuestion) {
@@ -57,34 +51,19 @@ export async function POST(req: Request) {
       );
     }
 
-    const stateWithAnswer: InterviewState = {
-      ...previousState,
-      currentUserAnswer: userAnswer,
-    };
+    const finalState = await runProcessAnswer(previousState, userAnswer);
 
-    // 3. Run LangGraph pipeline — returns captured eval/feedback + final state
-    const { finalState, capturedEvaluation, capturedFeedback } =
-      await runProcessAnswer(stateWithAnswer);
-
-    // 4. Persist updated state
     await db.update(InterviewSession)
       .set({
         sessionState: finalState as unknown as Record<string, unknown>,
         questionsAsked: finalState.questionsAsked,
         currentDifficulty: finalState.currentDifficulty,
-        ...(finalState.shouldEnd ? {
-          status: "completed",
-          overallRating: finalState.summary?.overallRating,
-          summary: JSON.stringify(finalState.summary),
-          completedAt: new Date(),
-        } : {}),
       })
       .where(eq(InterviewSession.sessionId, sessionId));
 
-    // 5. Return results — use CAPTURED values (not from finalState, which cleared them)
     return NextResponse.json({
-      evaluation: capturedEvaluation,
-      feedback: capturedFeedback,
+      evaluation: finalState.evaluation,
+      feedback: finalState.feedback,
       nextQuestion: finalState.shouldEnd ? null : finalState.currentQuestion,
       difficulty: finalState.currentDifficulty,
       questionNumber: finalState.questionsAsked,

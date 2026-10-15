@@ -1,21 +1,23 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 import { db } from "@/utils/db";
 import { InterviewSession } from "@/utils/schema";
 import { runEndInterview } from "@/lib/langgraph/workflow";
+import { getCurrentUserEmail, getOwnedSession } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 import type { InterviewState } from "@/lib/langgraph/state";
+
+export const maxDuration = 60;
 
 /**
  * POST /api/interview/end
  *
- * Explicitly ends an interview early and generates a summary.
- * Called when the user clicks "End Interview" before all questions are exhausted.
+ * Ends an interview early by running the LangGraph workflow (end branch),
+ * which goes straight to generateSummary.
  */
 export async function POST(req: Request) {
   try {
-    const user = await currentUser();
-    if (!user || !user.emailAddresses?.length) {
+    const email = await getCurrentUserEmail();
+    if (!email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -25,18 +27,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
     }
 
-    const sessions = await db.select()
-      .from(InterviewSession)
-      .where(eq(InterviewSession.sessionId, sessionId));
-
-    if (!sessions.length) {
+    const session = await getOwnedSession(sessionId, email);
+    if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const session = sessions[0];
-
     if (session.status === "completed") {
-      // Already completed — return existing summary
       return NextResponse.json({
         summary: session.summary ? JSON.parse(session.summary) : null,
         alreadyCompleted: true,
@@ -49,8 +45,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No session state found" }, { status: 400 });
     }
 
-    // Run LangGraph summary node
     const finalState = await runEndInterview(previousState);
+
+    await db.update(InterviewSession)
+      .set({ sessionState: finalState as unknown as Record<string, unknown> })
+      .where(eq(InterviewSession.sessionId, sessionId));
 
     return NextResponse.json({
       summary: finalState.summary,

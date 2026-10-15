@@ -8,8 +8,8 @@ export default function Features() {
 
         <div className="mt-16 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
           <Feature
-            title="AI-Generated Questions"
-            description="Interview questions dynamically generated using Google Gemini based on your job role."
+            title="Adaptive AI Questions"
+            description="Questions are generated one at a time by an LLM workflow, getting harder or easier based on your scores."
           />
 
           <Feature
@@ -19,7 +19,7 @@ export default function Features() {
 
           <Feature
             title="AI Feedback & Ratings"
-            description="Each answer is evaluated by AI with structured feedback and a performance score."
+            description="Each answer is scored against a model answer plus similar past answers retrieved from a vector database."
           />
 
           <Feature

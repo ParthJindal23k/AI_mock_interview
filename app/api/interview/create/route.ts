@@ -1,29 +1,26 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "@/utils/db";
 import { InterviewSession } from "@/utils/schema";
 import { createInitialState, runGenerateQuestion } from "@/lib/langgraph/workflow";
+import { getCurrentUserEmail } from "@/lib/auth";
 import { eq } from "drizzle-orm";
+
+export const maxDuration = 60;
 
 /**
  * POST /api/interview/create
  *
- * Creates a new adaptive interview session.
- * 1. Authenticates the user via Clerk
- * 2. Creates an InterviewSession record in the database
- * 3. Runs the LangGraph generateQuestion node to produce the first question
- * 4. Returns the sessionId, first question, and difficulty
+ * Creates a new adaptive interview session and runs the LangGraph workflow
+ * (start branch) to produce the first question.
  */
 export async function POST(req: Request) {
   try {
-    const user = await currentUser();
-
-    if (!user || !user.emailAddresses?.length) {
+    const email = await getCurrentUserEmail();
+    if (!email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const email = user.emailAddresses[0].emailAddress;
     const { jobPosition, jobDesc, jobExperience } = await req.json();
 
     if (!jobPosition || !jobDesc || !jobExperience) {
@@ -36,30 +33,33 @@ export async function POST(req: Request) {
     const sessionId = uuidv4();
     const maxQuestions = Number(process.env.INTERVIEW_QUESTION_COUNT) || 5;
 
-    // 1. Create session in DB
     await db.insert(InterviewSession).values({
       sessionId,
       jobPosition,
       jobDesc,
-      jobExperience,
+      jobExperience: String(jobExperience),
       createdBy: email,
       maxQuestions,
       currentDifficulty: "medium",
       status: "active",
     });
 
-    // 2. Initialize LangGraph state and generate first question
     const initialState = createInitialState({
       sessionId,
       jobPosition,
       jobDesc,
-      jobExperience,
+      jobExperience: String(jobExperience),
       maxQuestions,
     });
 
-    const stateAfterQuestion = await runGenerateQuestion(initialState);
+    let stateAfterQuestion;
+    try {
+      stateAfterQuestion = await runGenerateQuestion(initialState);
+    } catch (error) {
+      await db.delete(InterviewSession).where(eq(InterviewSession.sessionId, sessionId));
+      throw error;
+    }
 
-    // 3. Persist state to DB
     await db.update(InterviewSession)
       .set({
         sessionState: stateAfterQuestion as unknown as Record<string, unknown>,

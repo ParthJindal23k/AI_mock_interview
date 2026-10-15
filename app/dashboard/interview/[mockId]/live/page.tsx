@@ -1,24 +1,26 @@
 import { db } from '@/utils/db'
 import { InterviewSession } from '@/utils/schema'
 import { eq } from 'drizzle-orm'
+import { notFound } from 'next/navigation'
 import { createInitialState, runGenerateQuestion } from '@/lib/langgraph/workflow'
+import { getCurrentUserEmail, getOwnedSession } from '@/lib/auth'
 import LiveWrapper from './LiveWrapper'
+
+export const maxDuration = 60
 
 async function LiveInterviewPage({
   params,
 }: {
-  params: { mockId: string }
+  params: Promise<{ mockId: string }>
 }) {
   const sessionId = (await params).mockId
 
-  const result = await db.select().from(InterviewSession)
-    .where(eq(InterviewSession.sessionId, sessionId))
+  const email = await getCurrentUserEmail()
+  const session = email ? await getOwnedSession(sessionId, email) : null
 
-  if (!result.length) {
-    return <div className="p-10 text-gray-500">Interview session not found</div>
+  if (!session) {
+    notFound()
   }
-
-  const session = result[0]
 
   if (session.status === 'completed') {
     return (

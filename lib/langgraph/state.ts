@@ -1,58 +1,74 @@
+import { Annotation } from "@langchain/langgraph";
+
+export type Difficulty = "easy" | "medium" | "hard";
+
+export type InterviewAction = "start" | "answer" | "end";
+
+export type CurrentQuestion = {
+  id: number;
+  question: string;
+  expectedAnswer: string;
+  topic: string;
+};
+
+export type Evaluation = {
+  score: number;
+  strengths: string;
+  weaknesses: string;
+};
+
+export type Feedback = {
+  feedback: string;
+  areasOfImprovement: string;
+};
+
+export type Summary = {
+  overallRating: string;
+  strengths: string;
+  weaknesses: string;
+  recommendations: string;
+};
+
 /**
- * InterviewState — the state object that flows through the LangGraph workflow.
+ * LangGraph state schema for one interview session.
  *
- * This is serialized to the database (InterviewSession.sessionState) between
- * human-in-the-loop turns, allowing the graph to pause after question generation
- * and resume from answer evaluation when the user submits their response.
+ * Every channel uses last-value semantics: a node's returned partial update
+ * replaces the previous value. Between requests (while waiting for the user
+ * to answer) the full state is persisted in InterviewSession.sessionState.
  */
-export interface InterviewState {
-  // ── Session Context (set once at creation) ──
-  sessionId: string;
-  jobPosition: string;
-  jobDesc: string;
-  jobExperience: string;
-  maxQuestions: number;
+export const InterviewStateAnnotation = Annotation.Root({
+  // Which entry branch the graph should take for this invocation.
+  action: Annotation<InterviewAction>,
 
-  // ── Adaptive State (evolves each turn) ──
-  currentDifficulty: "easy" | "medium" | "hard";
-  questionsAsked: number;
-  recentScores: number[];
-  previousTopics: string[];
+  // Session context (set once at creation)
+  sessionId: Annotation<string>,
+  jobPosition: Annotation<string>,
+  jobDesc: Annotation<string>,
+  jobExperience: Annotation<string>,
+  maxQuestions: Annotation<number>,
 
-  // ── Current Turn Data ──
-  currentQuestion: {
-    id: number;
-    question: string;
-    expectedAnswer: string;
-    topic: string;
-  } | null;
-  currentUserAnswer: string | null;
+  // Adaptive state (evolves each turn)
+  currentDifficulty: Annotation<Difficulty>,
+  questionsAsked: Annotation<number>,
+  recentScores: Annotation<number[]>,
+  previousTopics: Annotation<string[]>,
 
-  // ── Outputs (populated by nodes) ──
-  evaluation: {
-    score: number;
-    strengths: string;
-    weaknesses: string;
-  } | null;
-  feedback: {
-    feedback: string;
-    areasOfImprovement: string;
-  } | null;
-  ragContext: string | null;
-  summary: {
-    overallRating: string;
-    strengths: string;
-    weaknesses: string;
-    recommendations: string;
-  } | null;
+  // Current turn
+  currentQuestion: Annotation<CurrentQuestion | null>,
+  currentUserAnswer: Annotation<string | null>,
 
-  // ── Control Flow ──
-  shouldEnd: boolean;
-}
+  // Node outputs
+  evaluation: Annotation<Evaluation | null>,
+  feedback: Annotation<Feedback | null>,
+  ragContext: Annotation<string | null>,
+  summary: Annotation<Summary | null>,
 
-/**
- * Creates a fresh initial state for a new interview session.
- */
+  // Control flow
+  shouldEnd: Annotation<boolean>,
+});
+
+export type InterviewState = typeof InterviewStateAnnotation.State;
+
 export function createInitialState(params: {
   sessionId: string;
   jobPosition: string;
@@ -61,6 +77,7 @@ export function createInitialState(params: {
   maxQuestions: number;
 }): InterviewState {
   return {
+    action: "start",
     sessionId: params.sessionId,
     jobPosition: params.jobPosition,
     jobDesc: params.jobDesc,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@clerk/nextjs/server";
 import { db } from "@/utils/db";
-import { InterviewSession, InterviewQuestion, InterviewAnswer } from "@/utils/schema";
+import { InterviewQuestion, InterviewAnswer } from "@/utils/schema";
+import { getCurrentUserEmail, getOwnedSession } from "@/lib/auth";
 import { eq } from "drizzle-orm";
 
 /**
@@ -12,8 +12,8 @@ import { eq } from "drizzle-orm";
  */
 export async function POST(req: Request) {
   try {
-    const user = await currentUser();
-    if (!user || !user.emailAddresses?.length) {
+    const email = await getCurrentUserEmail();
+    if (!email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -23,16 +23,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing sessionId" }, { status: 400 });
     }
 
-    // Load session
-    const sessions = await db.select()
-      .from(InterviewSession)
-      .where(eq(InterviewSession.sessionId, sessionId));
-
-    if (!sessions.length) {
+    const session = await getOwnedSession(sessionId, email);
+    if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
-
-    const session = sessions[0];
 
     // Load all questions
     const questions = await db.select()

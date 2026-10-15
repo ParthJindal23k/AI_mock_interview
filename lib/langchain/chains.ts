@@ -92,10 +92,10 @@ Question: {question}
 Expected Answer: {expectedAnswer}
 Candidate's Answer: {userAnswer}
 
-Similar high-quality answers from past interviews for reference:
+Reference answers to similar questions from past interviews (retrieved from the knowledge base; may be empty):
 {ragContext}
 
-Evaluate the candidate's answer thoroughly.
+Evaluate the candidate's answer thoroughly. Use the references only as additional grading context for what a strong answer covers.
 
 Respond ONLY with a JSON object in this exact format, no other text:
 {

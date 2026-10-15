@@ -1,23 +1,19 @@
 import { db } from "@/utils/db";
 import { desc, eq } from "drizzle-orm";
-import { currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { InterviewSession } from "@/utils/schema";
+import { getCurrentUserEmail } from "@/lib/auth";
 
 /**
  * POST /api/interviews
  *
  * Returns all interview sessions for the current user, ordered by most recent.
- * This replaces the old /api/GetInterviewList endpoint.
  */
-export async function POST(req: Request) {
-  const user = await currentUser();
-
-  if (!user || !user.primaryEmailAddress?.emailAddress) {
+export async function POST() {
+  const email = await getCurrentUserEmail();
+  if (!email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const email = user.primaryEmailAddress.emailAddress;
 
   const result = await db
     .select({

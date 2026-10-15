@@ -1,21 +1,28 @@
-import { InterviewState } from "./state";
+import type { InterviewState, Difficulty } from "./state";
 import {
   generateQuestionChain,
   evaluateAnswerChain,
   generateFeedbackChain,
   generateSummaryChain,
 } from "../langchain/chains";
-import { storeAnswerEmbedding, retrieveSimilarAnswers } from "../rag/vectorstore";
+import {
+  embedQuestion,
+  getQuestionEmbedding,
+  storeReferenceAnswer,
+  retrieveSimilarAnswers,
+} from "../rag/vectorstore";
 import { db } from "@/utils/db";
 import { InterviewQuestion, InterviewAnswer, InterviewSession } from "@/utils/schema";
 import { eq } from "drizzle-orm";
 
+type NodeUpdate = Partial<InterviewState>;
+
 /**
- * Node 1: Generate Question
- * Dynamically generates ONE question based on current difficulty and previous topics.
- * Stores the question in DB and embeds the expected answer in Pinecone.
+ * Node: generateQuestion
+ * Generates ONE question at the current difficulty, avoiding covered topics.
+ * Stores it in Postgres and adds its expected answer to the vector store.
  */
-export async function generateQuestion(state: InterviewState): Promise<Partial<InterviewState>> {
+export async function generateQuestion(state: InterviewState): Promise<NodeUpdate> {
   const result = await generateQuestionChain({
     jobPosition: state.jobPosition,
     jobDesc: state.jobDesc,
@@ -28,7 +35,6 @@ export async function generateQuestion(state: InterviewState): Promise<Partial<I
 
   const questionNumber = state.questionsAsked + 1;
 
-  // Store question in DB
   const [inserted] = await db.insert(InterviewQuestion).values({
     sessionId: state.sessionId,
     questionNumber,
@@ -38,22 +44,21 @@ export async function generateQuestion(state: InterviewState): Promise<Partial<I
     topicsCovered: result.topic,
   }).returning({ id: InterviewQuestion.id });
 
-  // Store expected answer embedding in Pinecone (grows the knowledge base)
-  try {
-    const embeddingId = await storeAnswerEmbedding(result.expectedAnswer, {
-      sessionId: state.sessionId,
-      questionId: inserted.id,
-      difficulty: state.currentDifficulty,
-      jobPosition: state.jobPosition,
-      type: "expected",
-    });
+  const embeddingRowId = await storeReferenceAnswer({
+    questionEmbedding: await embedQuestion(result.question),
+    sessionId: state.sessionId,
+    questionId: inserted.id,
+    source: "expected",
+    jobPosition: state.jobPosition,
+    difficulty: state.currentDifficulty,
+    question: result.question,
+    answer: result.expectedAnswer,
+  });
 
-    // Update embedding reference in DB
+  if (embeddingRowId !== null) {
     await db.update(InterviewQuestion)
-      .set({ embeddingId })
+      .set({ embeddingId: String(embeddingRowId) })
       .where(eq(InterviewQuestion.id, inserted.id));
-  } catch (error) {
-    console.error("Embedding storage failed (non-fatal):", error);
   }
 
   return {
@@ -65,37 +70,31 @@ export async function generateQuestion(state: InterviewState): Promise<Partial<I
     },
     questionsAsked: questionNumber,
     previousTopics: [...state.previousTopics, result.topic],
-    // Clear previous turn outputs
-    evaluation: null,
-    feedback: null,
-    ragContext: null,
     currentUserAnswer: null,
+    ragContext: null,
   };
 }
 
 /**
- * Node 2: Evaluate Answer
- * Uses RAG to retrieve similar answers, then evaluates the user's answer
- * against the expected answer + retrieved context.
+ * Node: evaluateAnswer
+ * RAG step: retrieves reference answers to similar past questions from pgvector,
+ * then scores the user's answer against the expected answer + retrieved context.
  */
-export async function evaluateAnswer(state: InterviewState): Promise<Partial<InterviewState>> {
+export async function evaluateAnswer(state: InterviewState): Promise<NodeUpdate> {
   if (!state.currentQuestion || !state.currentUserAnswer) {
     throw new Error("Cannot evaluate: missing question or user answer");
   }
 
-  // RAG: Retrieve similar high-quality answers for context
-  let ragContext = "No reference answers available.";
-  try {
-    ragContext = await retrieveSimilarAnswers(
-      state.currentUserAnswer,
-      { jobPosition: state.jobPosition },
-      3
-    );
-  } catch (error) {
-    console.error("RAG retrieval failed (non-fatal):", error);
-  }
+  const questionEmbedding = await getQuestionEmbedding(
+    state.currentQuestion.id,
+    state.currentQuestion.question
+  );
 
-  // Evaluate using LangChain chain with RAG context
+  const ragContext = await retrieveSimilarAnswers({
+    questionEmbedding,
+    excludeQuestionId: state.currentQuestion.id,
+  });
+
   const evaluation = await evaluateAnswerChain({
     question: state.currentQuestion.question,
     expectedAnswer: state.currentQuestion.expectedAnswer,
@@ -103,19 +102,18 @@ export async function evaluateAnswer(state: InterviewState): Promise<Partial<Int
     ragContext,
   });
 
-  // If user scored well (8+), store their answer in Pinecone too
+  // Strong candidate answers grow the knowledge base for future evaluations.
   if (evaluation.score >= 8) {
-    try {
-      await storeAnswerEmbedding(state.currentUserAnswer, {
-        sessionId: state.sessionId,
-        questionId: state.currentQuestion.id,
-        difficulty: state.currentDifficulty,
-        jobPosition: state.jobPosition,
-        type: "user",
-      });
-    } catch (error) {
-      console.error("User answer embedding failed (non-fatal):", error);
-    }
+    await storeReferenceAnswer({
+      questionEmbedding,
+      sessionId: state.sessionId,
+      questionId: state.currentQuestion.id,
+      source: "user",
+      jobPosition: state.jobPosition,
+      difficulty: state.currentDifficulty,
+      question: state.currentQuestion.question,
+      answer: state.currentUserAnswer,
+    });
   }
 
   return {
@@ -126,11 +124,10 @@ export async function evaluateAnswer(state: InterviewState): Promise<Partial<Int
 }
 
 /**
- * Node 3: Generate Feedback
- * Produces actionable improvement feedback based on the evaluation.
- * Stores the complete answer record in the database.
+ * Node: generateFeedback
+ * Produces actionable feedback and stores the full answer record.
  */
-export async function generateFeedback(state: InterviewState): Promise<Partial<InterviewState>> {
+export async function generateFeedback(state: InterviewState): Promise<NodeUpdate> {
   if (!state.evaluation || !state.currentQuestion || !state.currentUserAnswer) {
     throw new Error("Cannot generate feedback: missing evaluation data");
   }
@@ -143,7 +140,6 @@ export async function generateFeedback(state: InterviewState): Promise<Partial<I
     weaknesses: state.evaluation.weaknesses,
   });
 
-  // Store answer + evaluation + feedback in DB
   await db.insert(InterviewAnswer).values({
     questionId: state.currentQuestion.id,
     sessionId: state.sessionId,
@@ -160,14 +156,13 @@ export async function generateFeedback(state: InterviewState): Promise<Partial<I
 }
 
 /**
- * Node 4: Adjust Difficulty
- * Adapts the difficulty level based on recent scores.
- * Determines whether the interview should end.
+ * Node: adjustDifficulty
+ * Raises difficulty when the last two scores average 8+, lowers it at 4 or below,
+ * and decides whether the interview should end.
  */
-export async function adjustDifficulty(state: InterviewState): Promise<Partial<InterviewState>> {
-  let newDifficulty = state.currentDifficulty;
-  const scores = state.recentScores;
-  const lastTwo = scores.slice(-2);
+export async function adjustDifficulty(state: InterviewState): Promise<NodeUpdate> {
+  let newDifficulty: Difficulty = state.currentDifficulty;
+  const lastTwo = state.recentScores.slice(-2);
 
   if (lastTwo.length >= 2) {
     const avg = lastTwo.reduce((a, b) => a + b, 0) / lastTwo.length;
@@ -179,30 +174,17 @@ export async function adjustDifficulty(state: InterviewState): Promise<Partial<I
     }
   }
 
-  const shouldEnd = state.questionsAsked >= state.maxQuestions;
-
-  // Update session state in DB
-  await db.update(InterviewSession)
-    .set({
-      currentDifficulty: newDifficulty,
-      questionsAsked: state.questionsAsked,
-      sessionState: { ...state, currentDifficulty: newDifficulty, shouldEnd } as unknown as Record<string, unknown>,
-    })
-    .where(eq(InterviewSession.sessionId, state.sessionId));
-
   return {
     currentDifficulty: newDifficulty,
-    shouldEnd,
+    shouldEnd: state.questionsAsked >= state.maxQuestions,
   };
 }
 
 /**
- * Node 5: Generate Summary
- * Produces a final interview summary after all questions are answered.
- * Updates the session as completed.
+ * Node: generateSummary
+ * Summarizes the whole interview and marks the session as completed.
  */
-export async function generateSummary(state: InterviewState): Promise<Partial<InterviewState>> {
-  // Load all Q&A pairs for this session
+export async function generateSummary(state: InterviewState): Promise<NodeUpdate> {
   const questions = await db.select().from(InterviewQuestion)
     .where(eq(InterviewQuestion.sessionId, state.sessionId))
     .orderBy(InterviewQuestion.questionNumber);
@@ -217,13 +199,21 @@ export async function generateSummary(state: InterviewState): Promise<Partial<In
     return `Q${q.questionNumber} [${q.difficulty}]: ${q.question}\nScore: ${a?.score ?? "N/A"}/10\nAnswer: ${a?.userAnswer ?? "Not answered"}`;
   }).join("\n\n---\n\n");
 
-  const summary = await generateSummaryChain({
+  const generated = await generateSummaryChain({
     jobPosition: state.jobPosition,
     jobExperience: state.jobExperience,
     questionsAndScores,
   });
 
-  // Mark session as completed
+  // The LLM writes the narrative; the rating is computed so it always matches the per-question scores.
+  const scores = answers.map(a => a.score);
+  const summary = {
+    ...generated,
+    overallRating: scores.length
+      ? `${(scores.reduce((sum, s) => sum + s, 0) / scores.length).toFixed(1)}/10`
+      : "N/A",
+  };
+
   await db.update(InterviewSession)
     .set({
       status: "completed",
@@ -233,5 +223,5 @@ export async function generateSummary(state: InterviewState): Promise<Partial<In
     })
     .where(eq(InterviewSession.sessionId, state.sessionId));
 
-  return { summary };
+  return { summary, shouldEnd: true };
 }

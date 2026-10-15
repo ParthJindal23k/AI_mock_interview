@@ -1,4 +1,6 @@
-import { pgTable, serial, text, varchar, integer, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, varchar, integer, timestamp, jsonb, vector, index } from "drizzle-orm/pg-core";
+
+export const EMBEDDING_DIMENSIONS = 768;
 
 // ── Legacy Tables (kept for backward compatibility) ─────────
 export const MockInterview = pgTable("mockInterview", {
@@ -81,3 +83,28 @@ export const InterviewAnswer = pgTable("interview_answer", {
   retrievedContext: text("retrieved_context"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+/**
+ * AnswerEmbedding — RAG knowledge base stored in Postgres via pgvector.
+ * Each row is a reference answer (AI-generated expected answer, or a user
+ * answer that scored 8+), keyed by the embedding of the question it answers.
+ * Requires `CREATE EXTENSION vector` (run `npm run db:setup`).
+ */
+export const AnswerEmbedding = pgTable(
+  "answer_embedding",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: varchar("session_id", { length: 64 }).notNull(),
+    questionId: integer("question_id").notNull(),
+    source: varchar("source", { length: 10 }).notNull(),
+    jobPosition: varchar("job_position", { length: 255 }).notNull(),
+    difficulty: varchar("difficulty", { length: 10 }).notNull(),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }).notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (t) => [
+    index("answer_embedding_hnsw_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ]
+);

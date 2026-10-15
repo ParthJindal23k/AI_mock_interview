@@ -1,4 +1,5 @@
-import { InterviewState, createInitialState } from "./state";
+import { StateGraph, START, END } from "@langchain/langgraph";
+import { InterviewStateAnnotation, type InterviewState } from "./state";
 import {
   generateQuestion,
   evaluateAnswer,
@@ -8,65 +9,57 @@ import {
 } from "./nodes";
 
 /**
- * LangGraph Interview Workflow — Human-in-the-Loop
+ * Interview workflow as a LangGraph StateGraph (human-in-the-loop).
  *
- * Flow:
- *   START → generateQuestion → [PAUSE: user answers]
- *     → evaluateAnswer → generateFeedback → adjustDifficulty
- *     → shouldEnd? → generateSummary | generateQuestion → [PAUSE again]
+ *            ┌─ action=start ──► generateQuestion ──► END   (pause: wait for answer)
+ *   START ───┼─ action=answer ─► evaluateAnswer ─► generateFeedback ─► adjustDifficulty
+ *            │                                                           │
+ *            │                        shouldEnd=false ◄──────────────────┤
+ *            │                        └─► generateQuestion ──► END       │
+ *            │                        shouldEnd=true  ◄──────────────────┘
+ *            └─ action=end ───────────► generateSummary ──► END
+ *
+ * The graph runs once per HTTP request. Between requests the state lives in
+ * InterviewSession.sessionState, so the interview can pause for the user
+ * on a serverless deployment without an in-memory checkpointer.
  */
+const interviewGraph = new StateGraph(InterviewStateAnnotation)
+  .addNode("generateQuestion", generateQuestion)
+  .addNode("evaluateAnswer", evaluateAnswer)
+  .addNode("generateFeedback", generateFeedback)
+  .addNode("adjustDifficulty", adjustDifficulty)
+  .addNode("generateSummary", generateSummary)
+  .addConditionalEdges(
+    START,
+    (state) => {
+      if (state.action === "answer") return "evaluateAnswer";
+      if (state.action === "end") return "generateSummary";
+      return "generateQuestion";
+    },
+    ["generateQuestion", "evaluateAnswer", "generateSummary"]
+  )
+  .addEdge("evaluateAnswer", "generateFeedback")
+  .addEdge("generateFeedback", "adjustDifficulty")
+  .addConditionalEdges(
+    "adjustDifficulty",
+    (state) => (state.shouldEnd ? "generateSummary" : "generateQuestion"),
+    ["generateQuestion", "generateSummary"]
+  )
+  .addEdge("generateQuestion", END)
+  .addEdge("generateSummary", END)
+  .compile();
 
-// ── Phase 1: Generate First Question ────────────────────────
 export async function runGenerateQuestion(state: InterviewState): Promise<InterviewState> {
-  const updates = await generateQuestion(state);
-  return { ...state, ...updates };
+  return interviewGraph.invoke({ ...state, action: "start" });
 }
 
-// ── Phase 2: Process Answer + Continue ──────────────────────
-// Returns both the evaluation/feedback AND the next question (or summary).
-// The evaluation/feedback are captured BEFORE generateQuestion clears them.
-export async function runProcessAnswer(state: InterviewState): Promise<{
-  finalState: InterviewState;
-  capturedEvaluation: InterviewState["evaluation"];
-  capturedFeedback: InterviewState["feedback"];
-}> {
-  // Step 1: Evaluate the answer (includes RAG retrieval)
-  let currentState = { ...state };
-  const evalUpdates = await evaluateAnswer(currentState);
-  currentState = { ...currentState, ...evalUpdates };
-
-  // Step 2: Generate feedback
-  const feedbackUpdates = await generateFeedback(currentState);
-  currentState = { ...currentState, ...feedbackUpdates };
-
-  // ★ Capture evaluation & feedback BEFORE generateQuestion clears them
-  const capturedEvaluation = currentState.evaluation;
-  const capturedFeedback = currentState.feedback;
-
-  // Step 3: Adjust difficulty + check if interview should end
-  const difficultyUpdates = await adjustDifficulty(currentState);
-  currentState = { ...currentState, ...difficultyUpdates };
-
-  // Step 4: Conditional — generate next question or summary
-  if (currentState.shouldEnd) {
-    const summaryUpdates = await generateSummary(currentState);
-    currentState = { ...currentState, ...summaryUpdates };
-  } else {
-    const questionUpdates = await generateQuestion(currentState);
-    currentState = { ...currentState, ...questionUpdates };
-  }
-
-  return {
-    finalState: currentState,
-    capturedEvaluation,
-    capturedFeedback,
-  };
+export async function runProcessAnswer(state: InterviewState, userAnswer: string): Promise<InterviewState> {
+  return interviewGraph.invoke({ ...state, action: "answer", currentUserAnswer: userAnswer });
 }
 
-// ── Phase 3: Force End Interview ────────────────────────────
 export async function runEndInterview(state: InterviewState): Promise<InterviewState> {
-  const summaryUpdates = await generateSummary(state);
-  return { ...state, ...summaryUpdates, shouldEnd: true };
+  const finalState = await interviewGraph.invoke({ ...state, action: "end" });
+  return { ...finalState, shouldEnd: true };
 }
 
 export { createInitialState } from "./state";
