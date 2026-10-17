@@ -2,32 +2,6 @@ import { pgTable, serial, text, varchar, integer, timestamp, jsonb, vector, inde
 
 export const EMBEDDING_DIMENSIONS = 768;
 
-// ── Legacy Tables (kept for backward compatibility) ─────────
-export const MockInterview = pgTable("mockInterview", {
-  id: serial("id").primaryKey(),
-  mockId: varchar("mockId").notNull(),
-  jsonMockResp: text("jsonMockResp").notNull(),
-  jobPosition: varchar("jobPosition").notNull(),
-  jobDesc: varchar("jobDesc").notNull(),
-  jobExperience: varchar("jobExperience").notNull(),
-  createdBy: varchar("createdBy").notNull(),
-  createdAt: varchar("createdAt").notNull(),
-});
-
-export const UserAnswer = pgTable("userAnswer", {
-  id: serial("id").primaryKey(),
-  mockIdRef: varchar("mockId").notNull(),
-  question: varchar("question").notNull(),
-  correctAns: text("correctAns"),
-  userAns: text("userAns"),
-  feedback: text("feedback"),
-  rating: varchar("rating"),
-  userEmail: varchar("userEmail"),
-  createdAt: varchar("createdAt"),
-});
-
-// ── New Tables: Normalized Adaptive Interview Design ────────
-
 /**
  * InterviewSession — One record per interview session.
  * Tracks the overall session state, adaptive difficulty, and final summary.
