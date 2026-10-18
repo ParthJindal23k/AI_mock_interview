@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { EMBEDDING_DIMENSIONS } from "@/utils/schema";
 
-export const EMBEDDING_MODEL = "gemini-embedding-001";
+const EMBEDDING_MODEL = "gemini-embedding-001";
 
 let client: GoogleGenAI | null = null;
 

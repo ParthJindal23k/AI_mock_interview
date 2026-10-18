@@ -52,7 +52,6 @@ async function Feedback({
 
   return (
     <FeedbackClient
-      mockId={sessionId}
       result={result}
       summary={summary}
       overallRating={session.overallRating}

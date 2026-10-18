@@ -78,7 +78,6 @@ async function LiveInterviewPage({
   return (
     <LiveWrapper
       sessionId={sessionId}
-      session={JSON.parse(JSON.stringify(session))}
       initialQuestion={currentQuestion}
       initialDifficulty={sessionState?.currentDifficulty || session.currentDifficulty}
       initialQuestionNumber={sessionState?.questionsAsked || session.questionsAsked}

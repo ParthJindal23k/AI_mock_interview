@@ -9,19 +9,16 @@ const ShowFeedback = dynamic(() => import("./ShowFeedback"), {
 });
 
 export default function FeedbackClient({
-  mockId,
   result,
   summary,
   overallRating,
 }: {
-  mockId: string;
   result: any[];
   summary: any;
   overallRating: string | null;
 }) {
   return (
     <ShowFeedback
-      mockId={mockId}
       result={result}
       summary={summary}
       overallRating={overallRating}

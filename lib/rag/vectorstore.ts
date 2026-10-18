@@ -16,7 +16,7 @@ import { embedText } from "./embeddings";
 
 const MIN_SIMILARITY = 0.75;
 
-export function isRagEnabled(): boolean {
+function isRagEnabled(): boolean {
   return process.env.ENABLE_RAG !== "false" && !!process.env.GEMINI_API_KEY;
 }
 

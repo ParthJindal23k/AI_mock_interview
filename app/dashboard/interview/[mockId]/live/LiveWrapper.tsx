@@ -16,7 +16,6 @@ const LiveInterviewClient = dynamic(
 
 type LiveWrapperProps = {
   sessionId: string
-  session: any
   initialQuestion: any
   initialDifficulty: string
   initialQuestionNumber: number

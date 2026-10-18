@@ -24,12 +24,10 @@ type FeedbackItem = {
 }
 
 function ShowFeedback({
-  mockId,
   result,
   summary,
   overallRating,
 }: {
-  mockId: string
   result: FeedbackItem[]
   summary?: any
   overallRating?: string | null

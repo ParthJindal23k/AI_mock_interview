@@ -1,7 +1,6 @@
 "use client"
 
 import React, { useEffect, useState, useCallback } from "react"
-import dynamic from "next/dynamic"
 import { Button } from "@/components/ui/button"
 import { Mic, Volume2, Lightbulb, Loader2, ArrowRight, CheckCircle } from "lucide-react"
 import { toast } from "sonner"
@@ -12,7 +11,6 @@ import { useRouter } from "next/navigation"
 
 type LiveInterviewClientProps = {
   sessionId: string
-  session: any
   initialQuestion: { id: number; question: string; expectedAnswer: string; topic: string } | null
   initialDifficulty: string
   initialQuestionNumber: number
@@ -21,7 +19,6 @@ type LiveInterviewClientProps = {
 
 export default function LiveInterviewClient({
   sessionId,
-  session,
   initialQuestion,
   initialDifficulty,
   initialQuestionNumber,

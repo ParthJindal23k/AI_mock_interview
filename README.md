@@ -80,7 +80,6 @@ app/
   api/interview/create         Create a session and generate the first question
   api/interview/submit         Run the answer branch of the graph
   api/interview/end            End early and generate the summary
-  api/interview/feedback       Full feedback report for a session
   api/interviews               Interview history for the current user
   dashboard/                   Dashboard, interview setup, live interview, feedback pages
 components/                    Landing page and UI components

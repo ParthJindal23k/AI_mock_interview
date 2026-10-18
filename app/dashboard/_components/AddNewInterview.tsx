@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState,useEffect } from "react";
+import React, { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import axios from "axios";
-import { LoaderCircle, Plus ,Lock} from "lucide-react";
+import { LoaderCircle, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
