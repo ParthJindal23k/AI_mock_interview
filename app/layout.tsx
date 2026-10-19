@@ -34,6 +34,12 @@ export default function RootLayout({
             data-domain="https://ai-mock-interview-nu-virid.vercel.app/"
             src="https://insightica.vercel.app/analytics.js"
           />
+          <script
+            defer
+            data-website-id="a5731c53-aa9f-4747-ae6d-2fbf75f4fc39"
+            data-domain="https://ai-mock-interview-nu-virid.vercel.app"
+            src="http://localhost:3000/analytics.js"
+          />
         </head>
 
         <body
