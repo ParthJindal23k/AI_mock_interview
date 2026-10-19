@@ -30,10 +30,10 @@ export default function RootLayout({
         <head>
         <script
   defer
-  data-website-id="a5731c53-aa9f-4747-ae6d-2fbf75f4fc39"
-  data-domain="http://localhost:3001"
-  src="http://localhost:3000/analytics.js"
-/>
+  data-website-id="9184ffba-29b6-4d79-af2a-36c73f2852b5"
+  data-domain="https://ai-mock-interview-nu-virid.vercel.app"
+  src="https://site-lens-omega.vercel.app/analytics.js">
+</script>
         </head>
 
         <body
